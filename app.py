@@ -35,10 +35,17 @@ st.caption("Ask questions based on their YouTube content")
 with st.sidebar:
     st.header("Settings")
     selected_channel = st.selectbox("Select Scholar:", channels, key="channel_select")
+    
+    st.markdown("---")
+    st.markdown("### Advanced Settings")
+    num_sources = st.slider("Number of sources to retrieve:", 3, 10, 7)
+    response_length = st.slider("Max response length (tokens):", 500, 2000, 1200)
+    
     st.markdown("---")
     st.markdown("### About")
     st.markdown(f"Currently chatting with **{selected_channel}**")
     st.markdown("This chatbot uses RAG to answer based on actual video transcripts.")
+    
     st.markdown("---")
     if st.button("🗑️ Clear Chat History"):
         st.session_state.messages = []
@@ -58,23 +65,43 @@ if prompt := st.chat_input("Ask a question..."):
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
+                # Get embedding for the question
                 embedding_response = openai.embeddings.create(input=prompt, model="text-embedding-3-small")
                 query_embedding = embedding_response.data[0].embedding
-                results = supabase.rpc('match_documents', {'query_embedding': query_embedding, 'match_count': 5}).execute()
+                
+                # Retrieve more sources for better quality
+                results = supabase.rpc('match_documents', {
+                    'query_embedding': query_embedding, 
+                    'match_count': num_sources
+                }).execute()
+                
+                # Filter by selected channel
                 filtered_results = [r for r in results.data if r['metadata'].get('channel') == selected_channel]
+                
+                # If no results for channel, use all results
                 if not filtered_results:
-                    filtered_results = results.data[:3]
+                    filtered_results = results.data[:num_sources]
+                
                 if not filtered_results:
                     st.error("No relevant content found. Try a different question.")
                     st.stop()
+                
+                # Build context and sources
                 context_parts = []
                 sources = []
+                
                 for r in filtered_results:
                     context_parts.append(r['content'])
                     if 'title' in r['metadata'] and 'url' in r['metadata']:
-                        sources.append({'title': r['metadata']['title'], 'url': r['metadata']['url']})
+                        sources.append({
+                            'title': r['metadata']['title'],
+                            'url': r['metadata']['url'],
+                            'duration': r['metadata'].get('duration_str', 'Unknown')
+                        })
+                
                 context = "\n\n---\n\n".join(context_parts)
                 persona = filtered_results[0]['metadata'].get('persona', 'Islamic scholar')
+                
                 system_message = f"""You are {selected_channel}, {persona}.
 
 Answer questions based ONLY on the following context from your YouTube videos:
@@ -86,26 +113,53 @@ Guidelines:
 - Use "I" and "my" when referring to your views and videos
 - Stay true to the content and style shown in the videos
 - If the answer isn't in the context, say "I haven't discussed that topic in detail in my videos yet."
-- Be conversational and engaging
-- Keep responses concise but informative"""
+- Be conversational, engaging, and thorough
+- Provide detailed explanations when appropriate
+- You can use the full context - don't hold back on detail"""
+
+                # Use GPT-4o for best quality (128K context window)
                 response = openai.chat.completions.create(
-                    model="gpt-4",
-                    messages=[{"role": "system", "content": system_message}, {"role": "user", "content": prompt}],
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": system_message}, 
+                        {"role": "user", "content": prompt}
+                    ],
                     stream=True,
                     temperature=0.7,
-                    max_tokens=800
+                    max_tokens=response_length
                 )
+                
+                # Stream the response
                 message_placeholder = st.empty()
                 full_response = ""
+                
                 for chunk in response:
                     if chunk.choices[0].delta.content:
                         full_response += chunk.choices[0].delta.content
                         message_placeholder.markdown(full_response + "▌")
+                
                 message_placeholder.markdown(full_response)
+                
+                # Show sources with more detail
                 if sources:
-                    with st.expander("📚 Sources"):
-                        for i, source in enumerate(sources[:3], 1):
-                            st.markdown(f"{i}. [{source['title']}]({source['url']})")
+                    with st.expander("📚 Sources Used"):
+                        unique_sources = []
+                        seen_urls = set()
+                        for source in sources:
+                            if source['url'] not in seen_urls:
+                                unique_sources.append(source)
+                                seen_urls.add(source['url'])
+                        
+                        for i, source in enumerate(unique_sources, 1):
+                            st.markdown(f"**{i}. [{source['title']}]({source['url']})**")
+                            st.caption(f"Duration: {source['duration']}")
+                
+                # Add assistant response to history
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
+                
             except Exception as e:
                 st.error(f"Error: {str(e)}")
+                if "context_length_exceeded" in str(e):
+                    st.info("💡 Try reducing the 'Number of sources' slider in the sidebar.")
+                else:
+                    st.info("Please check your API keys and database connection.")
