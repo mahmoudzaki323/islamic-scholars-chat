@@ -8,20 +8,6 @@ st.markdown("""
 <style>
     .stApp { max-width: 1400px; margin: 0 auto; }
     h1 { color: #1e3a8a; text-align: center; padding: 1rem 0; }
-    .source-card { 
-        background: #f8fafc; 
-        padding: 1rem; 
-        border-radius: 8px; 
-        border-left: 4px solid #3b82f6;
-        margin: 0.5rem 0;
-    }
-    .evidence-block {
-        background: #fef3c7;
-        padding: 0.75rem;
-        border-radius: 6px;
-        margin: 0.5rem 0;
-        border-left: 3px solid #f59e0b;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -35,7 +21,6 @@ supabase = init_connections()
 
 @st.cache_data(ttl=3600)
 def get_authors():
-    """Get list of available scholars/authors"""
     try:
         result = supabase.table('source_documents').select('author').execute()
         authors = list(set([r['author'] for r in result.data if r.get('author')]))
@@ -45,7 +30,6 @@ def get_authors():
 
 @st.cache_data(ttl=3600)
 def get_source_types():
-    """Get list of source types"""
     try:
         result = supabase.table('source_documents').select('source_type').execute()
         types = list(set([r['source_type'] for r in result.data if r.get('source_type')]))
@@ -53,52 +37,58 @@ def get_source_types():
     except:
         return ['All Types', 'video', 'book']
 
-def search_and_retrieve(query, author_filter='All Sources', source_type_filter='All Types', num_results=5):
-    """
-    Hybrid retrieval:
-    1. Search chunks to find relevant documents
-    2. Return FULL parent documents (not just chunks)
-    """
+def smart_truncate(text, max_words=8000):
+    """Keep more content for better quality"""
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    
+    # Take 80% from beginning, 20% from end
+    first_part = int(max_words * 0.8)
+    last_part = int(max_words * 0.2)
+    
+    truncated = ' '.join(words[:first_part]) + "\n\n[... content truncated ...]\n\n" + ' '.join(words[-last_part:])
+    return truncated
+
+def search_and_retrieve(query, author_filter='All Sources', source_type_filter='All Types', num_results=7):
+    """Search and return full documents"""
     try:
-        # Create embedding for query
         embedding_response = openai.embeddings.create(input=query, model="text-embedding-3-small")
         query_embedding = embedding_response.data[0].embedding
         
-        # Search chunks and get parent documents
         results = supabase.rpc('match_documents_hybrid', {
             'query_embedding': query_embedding,
-            'match_count': num_results * 2  # Get more to filter
+            'match_count': num_results * 2
         }).execute()
         
         if not results.data:
             return []
         
-        # Apply filters
         filtered_docs = []
         seen_ids = set()
         
         for result in results.data:
-            # Skip duplicates
             if result['parent_id'] in seen_ids:
                 continue
             
-            # Apply author filter
             if author_filter != 'All Sources' and result['parent_author'] != author_filter:
                 continue
             
-            # Apply source type filter
             if source_type_filter != 'All Types' and result['parent_type'] != source_type_filter:
                 continue
+            
+            # Smart truncate but keep more content
+            truncated_content = smart_truncate(result['parent_content'], max_words=8000)
             
             filtered_docs.append({
                 'id': result['parent_id'],
                 'title': result['parent_title'],
-                'content': result['parent_content'],  # FULL document content
+                'content': truncated_content,
                 'type': result['parent_type'],
                 'author': result['parent_author'],
                 'metadata': result['parent_metadata'],
                 'url': result['parent_url'],
-                'matched_chunk': result['chunk_content'],  # Just for showing what matched
+                'matched_chunk': result['chunk_content'],
                 'similarity': result['similarity']
             })
             
@@ -113,36 +103,14 @@ def search_and_retrieve(query, author_filter='All Sources', source_type_filter='
         st.error(f"Search error: {str(e)}")
         return []
 
-def format_evidence(sources):
-    """Format sources for display"""
-    evidence = []
-    for i, source in enumerate(sources, 1):
-        source_type = source['type'].capitalize()
-        author = source['author']
-        title = source['title']
-        
-        if source['url']:
-            evidence.append(f"**[{i}] {author} - {title}** ({source_type})")
-            evidence.append(f"🔗 {source['url']}")
-        else:
-            evidence.append(f"**[{i}] {author} - {title}** ({source_type})")
-        
-        # Show similarity score
-        similarity_pct = round(source['similarity'] * 100, 1)
-        evidence.append(f"📊 Relevance: {similarity_pct}%")
-        evidence.append("")
-    
-    return "\n".join(evidence)
-
 # ========== UI ==========
 
 authors = get_authors()
 source_types = get_source_types()
 
-st.title("📚 Islamic Scholar AI")
-st.caption("Engage in scholarly discourse grounded in source texts")
+st.title("📚 Islamic Scholar AI - Dawah Assistant")
+st.caption("Direct, passionate Islamic guidance grounded in authentic sources")
 
-# Two-column layout
 col1, col2 = st.columns([2, 1])
 
 with col2:
@@ -150,26 +118,25 @@ with col2:
     
     selected_author = st.selectbox("Filter by Author:", authors)
     selected_type = st.selectbox("Filter by Source Type:", source_types)
-    num_sources = st.slider("Number of sources:", 3, 10, 5)
-    response_length = st.slider("Response detail:", 800, 2500, 1500)
+    num_sources = st.slider("Number of sources:", 3, 10, 7)
+    response_detail = st.slider("Response detail:", 1000, 3000, 2000)
     
     st.markdown("---")
     st.markdown("### 📊 Database")
     try:
         doc_count = supabase.table('source_documents').select('id', count='exact').execute()
         chunk_count = supabase.table('document_chunks').select('id', count='exact').execute()
-        st.metric("Full Documents", doc_count.count)
+        st.metric("Documents", doc_count.count)
         st.metric("Searchable Chunks", chunk_count.count)
     except:
         pass
     
     st.markdown("---")
-    if st.button("🗑️ Clear Conversation"):
+    if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []
         st.rerun()
 
 with col1:
-    # Chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
     
@@ -177,7 +144,6 @@ with col1:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     
-    # Chat input
     if prompt := st.chat_input("Ask a question..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
@@ -185,9 +151,8 @@ with col1:
             st.markdown(prompt)
         
         with st.chat_message("assistant"):
-            with st.spinner("Searching sources and formulating response..."):
+            with st.spinner("Consulting sources and preparing response..."):
                 try:
-                    # Step 1: Search and retrieve FULL documents
                     sources = search_and_retrieve(
                         query=prompt,
                         author_filter=selected_author,
@@ -196,43 +161,66 @@ with col1:
                     )
                     
                     if not sources:
-                        st.error("No relevant sources found. Try adjusting filters or ask a different question.")
+                        st.error("No relevant sources found. Try different filters or ask another question.")
                         st.stop()
                     
-                    # Step 2: Build context from FULL documents
+                    # Build rich context
                     context_parts = []
                     for i, source in enumerate(sources, 1):
-                        # Include FULL content, not just chunks
-                        context_parts.append(f"=== SOURCE {i}: {source['title']} by {source['author']} ===\n{source['content']}\n")
+                        context_parts.append(f"=== SOURCE {i}: {source['title']} by {source['author']} ({source['type']}) ===\n\n{source['content']}\n\n")
                     
                     full_context = "\n".join(context_parts)
                     
-                    # Step 3: Scholar system prompt
-                    system_message = f"""You are a knowledgeable Islamic scholar engaged in rigorous intellectual discourse.
+                    # Passionate dawah system prompt
+                    system_message = f"""You are a knowledgeable and passionate Islamic scholar whose purpose is dawah - inviting people to understand, appreciate, and embrace Islam.
 
-Your methodology:
-1. **Make clear arguments** - State your position directly
-2. **Cite specific evidence** - Reference exact sources with [Source X]
-3. **Show reasoning** - Explain the logical chain: Evidence → Inference → Conclusion
-4. **Be precise** - Quote or paraphrase specific passages when making points
-5. **Acknowledge complexity** - Present multiple views when they exist
-6. **Engage directly** - Respond to the question, don't just summarize
+Your style and methodology:
 
-Available sources (FULL documents):
+**BE DIRECT AND CONFIDENT**
+- Don't hedge: "Islam teaches..." not "Some Muslims believe..."
+- State the truth clearly and with conviction
+- Make definitive arguments backed by evidence
+
+**BE WARM AND INVITING**
+- Speak like a caring teacher who genuinely wants the best for the questioner
+- Show the beauty, wisdom, and mercy of Islam
+- Help them fall in love with the deen through your words
+
+**BE EVIDENCE-BASED**
+- Always cite sources: [Source 1], [Source 2], etc.
+- Quote directly when making key points
+- Show the proof before the conclusion
+- Build arguments: Evidence → Reasoning → Conclusion
+
+**BE SCHOLARLY BUT ACCESSIBLE**
+- Use proper Islamic terminology (explain when needed)
+- Reference scholars, hadith, Quran precisely
+- But speak in a way anyone can understand and appreciate
+
+**YOUR MISSION**
+This is not academic debate - this is dawah. Your goal is to:
+1. Clarify misconceptions about Islam
+2. Present irrefutable evidence for Islam's truth
+3. Inspire love for Allah and His religion
+4. Remove doubts and strengthen faith
+5. Invite to the straight path with wisdom and beautiful preaching
+
+**STRUCTURE YOUR RESPONSES LIKE A SHEIKH**
+1. Direct answer to their question (1-2 sentences)
+2. Primary evidence from sources (Quran, Hadith, scholars)
+3. Logical reasoning showing why this is true
+4. Additional supporting evidence
+5. Powerful conclusion that ties it together
+
+Available sources:
 
 {full_context}
 
-Critical instructions:
-- You are NOT roleplaying as any specific person
-- You are a scholar analyzing and synthesizing these sources
-- Make arguments like: "The evidence suggests... because Source 2 states... Therefore..."
-- Use format: [Source 1], [Source 2], etc. when citing
-- If sources disagree, acknowledge both perspectives
-- If sources don't address the question, say so clearly
+Remember: You are not giving a Wikipedia summary. You are a passionate scholar making dawah. Be confident, warm, evidence-based, and inspiring. Make them see the truth and beauty of Islam through your words.
 
-Respond in a scholarly but accessible tone. Be direct and argumentative when appropriate."""
+May Allah guide us all to the straight path."""
 
-                    # Step 4: Generate response with streaming
+                    # Use GPT-4o for maximum quality
                     response = openai.chat.completions.create(
                         model="gpt-4o",
                         messages=[
@@ -240,11 +228,10 @@ Respond in a scholarly but accessible tone. Be direct and argumentative when app
                             {"role": "user", "content": prompt}
                         ],
                         stream=True,
-                        temperature=0.7,
-                        max_tokens=response_length
+                        temperature=0.85,  # Higher for more passionate responses
+                        max_tokens=response_detail
                     )
                     
-                    # Stream response
                     message_placeholder = st.empty()
                     full_response = ""
                     
@@ -255,11 +242,11 @@ Respond in a scholarly but accessible tone. Be direct and argumentative when app
                     
                     message_placeholder.markdown(full_response)
                     
-                    # Step 5: Show sources used
-                    with st.expander("📚 Sources Consulted", expanded=True):
+                    # Show sources
+                    with st.expander("📚 Sources Consulted", expanded=False):
                         for i, source in enumerate(sources, 1):
                             st.markdown(f"### [{i}] {source['title']}")
-                            st.caption(f"**Author:** {source['author']} | **Type:** {source['type'].capitalize()}")
+                            st.caption(f"**{source['author']}** • {source['type'].capitalize()}")
                             
                             if source['url']:
                                 st.markdown(f"🔗 [View Source]({source['url']})")
@@ -267,20 +254,33 @@ Respond in a scholarly but accessible tone. Be direct and argumentative when app
                             similarity_pct = round(source['similarity'] * 100, 1)
                             st.progress(source['similarity'], text=f"Relevance: {similarity_pct}%")
                             
-                            # Show what part matched (the chunk that triggered this document)
                             with st.expander("Preview matched section"):
-                                st.markdown(f"_{source['matched_chunk'][:300]}..._")
+                                st.markdown(f"_{source['matched_chunk'][:400]}..._")
                             
                             st.markdown("---")
                     
-                    # Save to history
                     st.session_state.messages.append({"role": "assistant", "content": full_response})
                     
                 except Exception as e:
-                    st.error(f"Error: {str(e)}")
-                    if "context_length_exceeded" in str(e):
-                        st.info("💡 Try reducing the 'Number of sources' - some documents are very long.")
+                    st.error(f"❌ Error: {str(e)}")
+                    
+                    if "rate_limit" in str(e).lower():
+                        st.warning("""
+                        **Rate Limit Exceeded**
+                        
+                        Your OpenAI account has a 30K tokens/minute limit. This happened because:
+                        - You're sending ~7 full documents (each can be 5K-10K tokens)
+                        - Total request was too large
+                        
+                        **Quick fixes:**
+                        1. Reduce "Number of sources" slider to 3-4
+                        2. Wait 1 minute and try again
+                        3. Upgrade your OpenAI tier at platform.openai.com
+                        """)
+                    
+                    elif "context_length" in str(e).lower():
+                        st.warning("Context too large. Reduce number of sources.")
+                    
                     else:
-                        st.info("Check console for details.")
-                    import traceback
-                    st.code(traceback.format_exc())
+                        with st.expander("Debug Info"):
+                            st.code(str(e))
