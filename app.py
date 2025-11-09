@@ -190,16 +190,3 @@ Guidelines:
             except Exception as e:
                 st.error(f"Error: {str(e)}")
                 st.info("Please check your API keys and database connection.")
-```
-
-**Commit this file.**
-
----
-
-### **File 2: `requirements.txt`**
-
-Click **"Add file"** → **"Create new file"** → Name it `requirements.txt`
-```
-streamlit
-supabase
-openai
