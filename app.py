@@ -37,19 +37,6 @@ def get_source_types():
     except:
         return ['All Types', 'video', 'book']
 
-def smart_truncate(text, max_words=8000):
-    """Keep more content for better quality"""
-    words = text.split()
-    if len(words) <= max_words:
-        return text
-    
-    # Take 80% from beginning, 20% from end
-    first_part = int(max_words * 0.8)
-    last_part = int(max_words * 0.2)
-    
-    truncated = ' '.join(words[:first_part]) + "\n\n[... content truncated ...]\n\n" + ' '.join(words[-last_part:])
-    return truncated
-
 def search_and_retrieve(query, author_filter='All Sources', source_type_filter='All Types', num_results=7):
     """Search and return full documents"""
     try:
@@ -77,13 +64,10 @@ def search_and_retrieve(query, author_filter='All Sources', source_type_filter='
             if source_type_filter != 'All Types' and result['parent_type'] != source_type_filter:
                 continue
             
-            # Smart truncate but keep more content
-            truncated_content = smart_truncate(result['parent_content'], max_words=8000)
-            
             filtered_docs.append({
                 'id': result['parent_id'],
                 'title': result['parent_title'],
-                'content': truncated_content,
+                'content': result['parent_content'],
                 'type': result['parent_type'],
                 'author': result['parent_author'],
                 'metadata': result['parent_metadata'],
@@ -119,7 +103,7 @@ with col2:
     selected_author = st.selectbox("Filter by Author:", authors)
     selected_type = st.selectbox("Filter by Source Type:", source_types)
     num_sources = st.slider("Number of sources:", 3, 10, 7)
-    response_detail = st.slider("Response detail:", 1000, 3000, 2000)
+    response_detail = st.slider("Response detail:", 1000, 2500, 2000)
     
     st.markdown("---")
     st.markdown("### 📊 Database")
@@ -127,9 +111,12 @@ with col2:
         doc_count = supabase.table('source_documents').select('id', count='exact').execute()
         chunk_count = supabase.table('document_chunks').select('id', count='exact').execute()
         st.metric("Documents", doc_count.count)
-        st.metric("Searchable Chunks", chunk_count.count)
+        st.metric("Chunks", chunk_count.count)
     except:
         pass
+    
+    st.markdown("---")
+    st.info("Using gpt-4o-mini (200K TPM)")
     
     st.markdown("---")
     if st.button("🗑️ Clear Chat"):
@@ -151,7 +138,7 @@ with col1:
             st.markdown(prompt)
         
         with st.chat_message("assistant"):
-            with st.spinner("Consulting sources and preparing response..."):
+            with st.spinner("Consulting sources..."):
                 try:
                     sources = search_and_retrieve(
                         query=prompt,
@@ -161,74 +148,65 @@ with col1:
                     )
                     
                     if not sources:
-                        st.error("No relevant sources found. Try different filters or ask another question.")
+                        st.error("No relevant sources found. Try different filters.")
                         st.stop()
                     
-                    # Build rich context
+                    # Build context from full documents
                     context_parts = []
                     for i, source in enumerate(sources, 1):
-                        context_parts.append(f"=== SOURCE {i}: {source['title']} by {source['author']} ({source['type']}) ===\n\n{source['content']}\n\n")
+                        context_parts.append(f"=== SOURCE {i}: {source['title']} by {source['author']} ===\n\n{source['content']}\n\n")
                     
                     full_context = "\n".join(context_parts)
                     
-                    # Passionate dawah system prompt
+                    # Dawah-focused system prompt
                     system_message = f"""You are a knowledgeable and passionate Islamic scholar whose purpose is dawah - inviting people to understand, appreciate, and embrace Islam.
-
-Your style and methodology:
 
 **BE DIRECT AND CONFIDENT**
 - Don't hedge: "Islam teaches..." not "Some Muslims believe..."
-- State the truth clearly and with conviction
-- Make definitive arguments backed by evidence
+- State the truth clearly with conviction
+- Make definitive arguments backed by solid evidence
 
 **BE WARM AND INVITING**
-- Speak like a caring teacher who genuinely wants the best for the questioner
+- Speak like a caring sheikh who genuinely wants guidance for the questioner
 - Show the beauty, wisdom, and mercy of Islam
-- Help them fall in love with the deen through your words
+- Help them appreciate and love the deen
 
 **BE EVIDENCE-BASED**
-- Always cite sources: [Source 1], [Source 2], etc.
+- Always cite sources: [Source 1], [Source 2]
 - Quote directly when making key points
-- Show the proof before the conclusion
 - Build arguments: Evidence → Reasoning → Conclusion
+- Reference Quran, Hadith, and scholars precisely
 
-**BE SCHOLARLY BUT ACCESSIBLE**
-- Use proper Islamic terminology (explain when needed)
-- Reference scholars, hadith, Quran precisely
-- But speak in a way anyone can understand and appreciate
-
-**YOUR MISSION**
-This is not academic debate - this is dawah. Your goal is to:
-1. Clarify misconceptions about Islam
-2. Present irrefutable evidence for Islam's truth
-3. Inspire love for Allah and His religion
-4. Remove doubts and strengthen faith
-5. Invite to the straight path with wisdom and beautiful preaching
-
-**STRUCTURE YOUR RESPONSES LIKE A SHEIKH**
-1. Direct answer to their question (1-2 sentences)
+**YOUR APPROACH**
+1. Direct answer to the question (be bold and clear)
 2. Primary evidence from sources (Quran, Hadith, scholars)
 3. Logical reasoning showing why this is true
 4. Additional supporting evidence
-5. Powerful conclusion that ties it together
+5. Powerful conclusion that inspires
+
+**YOUR MISSION**
+This is dawah. Your goal is to:
+- Clarify Islam's teachings with evidence
+- Remove doubts and misconceptions
+- Show Islam's truth, beauty, and perfection
+- Inspire love for Allah and His religion
+- Invite to the straight path with wisdom
 
 Available sources:
 
 {full_context}
 
-Remember: You are not giving a Wikipedia summary. You are a passionate scholar making dawah. Be confident, warm, evidence-based, and inspiring. Make them see the truth and beauty of Islam through your words.
+Respond as a passionate scholar making dawah - confident, warm, evidence-based, and inspiring. Make them see the truth and beauty of Islam."""
 
-May Allah guide us all to the straight path."""
-
-                    # Use GPT-4o for maximum quality
+                    # Use gpt-4o-mini (200K TPM limit!)
                     response = openai.chat.completions.create(
-                        model="gpt-4o",
+                        model="gpt-4o-mini",
                         messages=[
                             {"role": "system", "content": system_message},
                             {"role": "user", "content": prompt}
                         ],
                         stream=True,
-                        temperature=0.85,  # Higher for more passionate responses
+                        temperature=0.85,
                         max_tokens=response_detail
                     )
                     
@@ -243,7 +221,7 @@ May Allah guide us all to the straight path."""
                     message_placeholder.markdown(full_response)
                     
                     # Show sources
-                    with st.expander("📚 Sources Consulted", expanded=False):
+                    with st.expander(f"📚 {len(sources)} Sources Used", expanded=False):
                         for i, source in enumerate(sources, 1):
                             st.markdown(f"### [{i}] {source['title']}")
                             st.caption(f"**{source['author']}** • {source['type'].capitalize()}")
@@ -254,8 +232,8 @@ May Allah guide us all to the straight path."""
                             similarity_pct = round(source['similarity'] * 100, 1)
                             st.progress(source['similarity'], text=f"Relevance: {similarity_pct}%")
                             
-                            with st.expander("Preview matched section"):
-                                st.markdown(f"_{source['matched_chunk'][:400]}..._")
+                            with st.expander("Preview"):
+                                st.markdown(f"_{source['matched_chunk'][:300]}..._")
                             
                             st.markdown("---")
                     
@@ -263,24 +241,5 @@ May Allah guide us all to the straight path."""
                     
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
-                    
-                    if "rate_limit" in str(e).lower():
-                        st.warning("""
-                        **Rate Limit Exceeded**
-                        
-                        Your OpenAI account has a 30K tokens/minute limit. This happened because:
-                        - You're sending ~7 full documents (each can be 5K-10K tokens)
-                        - Total request was too large
-                        
-                        **Quick fixes:**
-                        1. Reduce "Number of sources" slider to 3-4
-                        2. Wait 1 minute and try again
-                        3. Upgrade your OpenAI tier at platform.openai.com
-                        """)
-                    
-                    elif "context_length" in str(e).lower():
-                        st.warning("Context too large. Reduce number of sources.")
-                    
-                    else:
-                        with st.expander("Debug Info"):
-                            st.code(str(e))
+                    with st.expander("Debug Info"):
+                        st.code(str(e))
