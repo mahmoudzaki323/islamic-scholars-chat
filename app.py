@@ -93,7 +93,7 @@ authors = get_authors()
 source_types = get_source_types()
 
 st.title("📚 Islamic Scholar AI - Dawah Assistant")
-st.caption("Direct, passionate Islamic guidance grounded in authentic sources")
+st.caption("Islamic guidance grounded in authentic sources")
 
 col1, col2 = st.columns([2, 1])
 
