@@ -173,7 +173,7 @@ with col1:
                     
                     full_context = "\n".join(context_parts)
                     
-                    #system_message = f"""You are an Islamic scholar making dawah through logical reasoning. CRITICAL: Every argument must be built from the sources provided below. Do not make generic philosophical points - extract and synthesize the actual arguments your sources make.
+                    system_message = f"""You are an Islamic scholar making dawah through logical reasoning. CRITICAL: Every argument must be built from the sources provided below. Do not make generic philosophical points - extract and synthesize the actual arguments your sources make.
 
 **YOUR MISSION:**
 Present Islam's truth by carefully building logical arguments FROM THE SOURCES, making them accessible to anyone regardless of background.
