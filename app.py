@@ -136,34 +136,7 @@ with col2:
     if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []
         st.rerun()
-```
 
----
-
-## New Defaults:
-
-| Setting | Old | New | Reasoning |
-|---------|-----|-----|-----------|
-| **Number of sources** | 7 | **5** | 5 × 35K = 175K tokens (safe) |
-| **Response detail** | 2000 | **1500** | More room for sources |
-| **Max sources** | 10 | **8** | Prevents accidents |
-
----
-
-## Token Math:
-
-**With new defaults (5 sources):**
-```
-5 sources × 35,000 tokens = 175,000 tokens
-System prompt = 3,000 tokens
-User question = 1,000 tokens
-Response (1500 tokens) = 1,500 tokens
-Total = ~180,500 tokens ✅ (under 200K)
-```
-
-**If user slides to 6:**
-```
-6 sources × 35,000 tokens = 210,000 tokens ❌ (over 200K)
 
 with col1:
     if "messages" not in st.session_state:
