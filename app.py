@@ -102,8 +102,22 @@ with col2:
     
     selected_author = st.selectbox("Filter by Author:", authors)
     selected_type = st.selectbox("Filter by Source Type:", source_types)
-    num_sources = st.slider("Number of sources:", 3, 10, 7)
-    response_detail = st.slider("Response detail:", 1000, 2500, 2000)
+    
+    num_sources = st.slider(
+        "Number of sources:", 
+        min_value=2, 
+        max_value=8, 
+        value=5,  # Default to 5 (was 7)
+        help="⚠️ More sources may hit token limits"
+    )
+    
+    response_detail = st.slider(
+        "Response detail:", 
+        min_value=800, 
+        max_value=2000, 
+        value=1500,  # Reduced from 2000
+        help="Length of AI response"
+    )
     
     st.markdown("---")
     st.markdown("### 📊 Database")
@@ -116,12 +130,40 @@ with col2:
         pass
     
     st.markdown("---")
-    st.info("Using gpt-4o-mini (200K TPM)")
+    st.info("🤖 Using gpt-4o-mini\n\n⚡ 200K token limit\n\n💡 5 sources = optimal quality")
     
     st.markdown("---")
     if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []
         st.rerun()
+```
+
+---
+
+## New Defaults:
+
+| Setting | Old | New | Reasoning |
+|---------|-----|-----|-----------|
+| **Number of sources** | 7 | **5** | 5 × 35K = 175K tokens (safe) |
+| **Response detail** | 2000 | **1500** | More room for sources |
+| **Max sources** | 10 | **8** | Prevents accidents |
+
+---
+
+## Token Math:
+
+**With new defaults (5 sources):**
+```
+5 sources × 35,000 tokens = 175,000 tokens
+System prompt = 3,000 tokens
+User question = 1,000 tokens
+Response (1500 tokens) = 1,500 tokens
+Total = ~180,500 tokens ✅ (under 200K)
+```
+
+**If user slides to 6:**
+```
+6 sources × 35,000 tokens = 210,000 tokens ❌ (over 200K)
 
 with col1:
     if "messages" not in st.session_state:
